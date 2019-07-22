@@ -15,23 +15,23 @@ population <- read_excel(tf,
   gather(year, pop, -c(country, `Country code`)) %>%
   mutate(iso3 = countrycode(country, "country.name", "iso3c", custom_match = c(`Eswatini` = "SWZ"))) %>%
   filter(!is.na(iso3)) %>%
-  mutate(pop = parse_number(pop) * 1000) %>%
+  mutate(pop = parse_number(pop) * 1000,
+         year = parse_number(year)) %>%
   select(iso3, year, pop)
 
 saveRDS(population, "./data/un_population_country_year.rds")
 
 
-
-
-# Penn World GDP data -----------------------------------------------------
+# Penn World data ---------------------------------------------------------
 ## rgdpe: Expenditure-side real GDP at chained PPPs (in mil. 2011US$)
+## pop:	Population (in millions)
 url1 <- "https://www.rug.nl/ggdc/docs/pwt91.xlsx"
 GET(url1, write_disk(tf <- tempfile(fileext = ".xlsx")))
 
 penn_gdp <- read_excel(tf, sheet = "Data") %>%
-  mutate(gdp_exp = rgdpe * 1000000,
-         gdp_out = rgdpo * 1000000) %>%
-  select(iso3 = countrycode, year, gdp_exp, gdp_out)
+  mutate(gdp_exp = rgdpe * 1e6,
+         pop = pop * 1e6) %>%
+  select(iso3 = countrycode, year, gdp_exp, pop)
 
 saveRDS(penn_gdp, "./data/penn_gdp.rds")
 
