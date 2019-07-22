@@ -1,0 +1,150 @@
+---
+title: 'Migration Hump: Deconstructing the cross-section'
+author: "David Benček"
+date: "19 Juli 2019"
+output: 
+ html_document:
+   code_download: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+library(tidyverse)
+library(ggrepel)
+library(plm)
+library(np)
+
+theme_set(theme_light())
+```
+
+## Summary
+
+Migration hump as a well-known phenomenon among researchers, practitioners as well as politicians.
+Most prominently propagated by Clemens/Postel (2014, 2017)
+
+
+## Reproduction of Clemens & Postel (2014)
+
+```{r migration-flows, echo = FALSE}
+## load World Bank migration stocks
+## previously constructed from bilateral migration matrices
+wb <- readRDS("../data/wb_bilateral_stocks.rds")
+
+
+## calculate flows from stocks
+### option a) calculate total outward stock per country and year, 
+###           then calculate flow from differences between years,
+###           then delete negative flows
+emigration <- wb %>%
+  rename(iso3 = origin_code) %>%
+  filter(year <= 2010) %>%
+  group_by(iso3, year) %>%
+  summarise(emigration_stock = sum(outward_stock, na.rm = TRUE)) %>%
+  mutate(emigration_flow = emigration_stock - dplyr::lag(emigration_stock, order_by = year),
+         decade = year - 10) %>%
+  ungroup() %>%
+  select(-year) %>%
+  filter(!is.na(emigration_flow),
+         emigration_flow > 0) %>%
+  filter(!(iso3 %in% c("MAC", "BRN"))) # to replicate Clemens (2014)
+```
+
+```{r population}
+## load UN population data by age and year (in thousands)
+##  United Nations, Department of Economic and Social Affairs, Population Division (2019). World Population Prospects 2019, Online Edition.
+## see 'data_prep.R'
+population <- readRDS("../data/un_population_country_year.rds")
+```
+
+
+```{r gdp}
+## load GDP data
+## Feenstra, Robert C., Robert Inklaar and Marcel P. Timmer (2015), "The Next Generation of the Penn World Table" American Economic Review, 105(10), 3150-3182, available for download at www.ggdc.net/pwt
+## see 'data_prep.R'
+
+gdp_penn <- readRDS("../data/penn_gdp.rds")
+```
+
+```{r armed-conflict}
+## load UCDP armed conflict data
+## Pettersson, Therese; Stina Högbladh & Magnus Öberg, 2019. Organized violence, 1989-2018 and peace agreements, Journal of Peace Research 56(4).
+## Gleditsch, Nils Petter, Peter Wallensteen, Mikael Eriksson, Margareta Sollenberg, and Håvard Strand (2002) Armed Conflict 1946-2001: A New Dataset. Journal of Peace Research 39(5). 
+acd <- readRDS("../data/ucdp_acd.rds") %>%
+  filter(!is.na(iso3)) %>%
+  mutate(decade = year %/% 10 * 10) %>% 
+  complete(iso3, decade) %>%
+  replace_na(list(conflict = 0)) %>%
+  group_by(iso3, decade) %>%
+  summarise(conflict = sum(conflict, na.rm = TRUE) > 0) %>%
+  ungroup()
+```
+
+```{r reproduction-data}
+clemens <- emigration %>%
+  left_join(population, c("iso3", "decade" = "year"))  %>%
+  left_join(gdp_penn, c("iso3", "decade" = "year")) %>%
+  left_join(acd, c("iso3", "decade")) %>%
+  replace_na(list(conflict = FALSE)) %>%
+  mutate(decadal_emigration_rate = emigration_flow/pop,
+         gdp_pc_exp = gdp_exp / pop) %>%
+  mutate(period = paste(decade, decade + 10, sep = "–")) %>%
+  select(iso3, decade, period, decadal_emigration_rate, gdp_pc_exp, pop, conflict) %>%
+  mutate(small = pop < 2500000,
+         small_or_conflict = small + conflict > 0) %>%
+  filter(!is.na(gdp_pc_exp)) # there are no observations where one gdp variable is NA while the other is not.
+```
+
+```{r}
+## Kernel smoother function
+bw_lpoly <- function(bw, data) {
+  #bw_opt <- npregbw(decadal_emigration_rate ~ log(gdp_pc), data = data, ckertype = "epanechnikov")
+  
+  model <- npreg(decadal_emigration_rate ~ log(gdp_pc_exp), data = data, 
+                 ckertype = "epanechnikov", bws = bw)
+  data <- data %>%
+    mutate(bw = bw,
+           smooth = model$mean)
+}
+
+## estimate kernel regression over range of bandwidths
+estimate_local_poly <- function(df, bw = 0.5) {
+  map_df(bw, bw_lpoly, data = df)
+}
+
+
+
+lpoly <- clemens %>%
+  group_by(period) %>%
+  mutate(label = ifelse(decadal_emigration_rate > quantile(decadal_emigration_rate, probs = 0.9),
+                        iso3, "")) %>%
+  ungroup() %>%
+  # filter(decadal_emigration_rate < quantile(decadal_emigration_rate, probs = 0.9) & 
+  #          decadal_emigration_rate > quantile(decadal_emigration_rate, probs = 0.1)) %>%
+  # filter(decadal_emigration_rate < 0.1) %>%
+  # filter(!small_or_conflict) %>%
+  nest(-period) %>%
+  mutate(smoother = data %>% map(estimate_local_poly, bw = seq(0.4, 0.6, 0.02))) %>%
+  unnest(smoother)
+  
+
+
+lpoly %>%
+  ggplot() +
+  geom_line(aes(gdp_pc_exp, smooth, group = bw), alpha = 0.1) +
+  geom_line(data = lpoly %>% group_by(period, gdp_pc_exp) %>% summarise(smooth = mean(smooth)),
+            aes(gdp_pc_exp, smooth), size = 1) +
+  # geom_point(data = lpoly %>% distinct(period, iso3, .keep_all = TRUE),
+  #            aes(x = gdp_pc_exp, y = decadal_emigration_rate, colour = small), alpha = 0.2) + #colour = "#009E73"
+  # geom_text_repel(data = lpoly %>% distinct(period, iso3, .keep_all = TRUE),
+  #                 aes(x = gdp_pc_exp, y = decadal_emigration_rate, label = label, colour = small)) +
+  scale_x_log10(breaks = c(500, 5000, 50000), limits = c(400, 100000)) +
+  scale_y_continuous(label = scales::percent_format(accuracy = 1)) + # limits = c(0, 0.6)
+  scale_colour_manual(values = c("#cccccc", "#E69F00"), name = "Population < 2.5 Mio.") +
+  facet_wrap(~period) +
+  labs(x = "Initial GDP per capita (log scale)",
+       y = "Decadal emigration flow/initial population")
+
+```
+
+
+
