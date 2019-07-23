@@ -214,7 +214,7 @@ lpoly %>%
 What kind of countries have such high emigration rates in the duration of a single decade?
 The plot below depicts country size in two ways:
 
-  - physical size (measured as the surface area in log km^2), reflected in the area of the circles;
+  - physical size (measured as the surface area in log km^2^), reflected in the area of the circles;
   - population size (measured as a binary variable indicating a population below or above 2.5 million), reflected in the colour of the circles.
   
 Among those countries that drive the inverted U-shape of the fitted line, the vast majority is small in both physical size and population.
@@ -233,7 +233,7 @@ lpoly %>%
   scale_colour_colorblind(name = NULL, guide = FALSE) +
   scale_fill_manual(values = c(alpha("#cccccc", 0.3), alpha("#009E73", 0.6)), labels = c("> 2.5 mio.","< 2.5 mio."),
                     name = "Population", guide = guide_legend(title.position = "top", override.aes = list(size = 3))) + 
-  scale_size(trans = "exp", name = "log(area[km^2])", range = c(2, 8), breaks = seq(4,16,2), 
+  scale_size(trans = "exp", name = expression(paste("log(area[", km^{2}, "])")), range = c(2, 8), breaks = seq(4,16,2), 
              guide = guide_legend(title.position = "top", override.aes = list(colour = "black"))) +
   facet_wrap(~period) +
   labs(x = "Initial GDP per capita (2005 PPP US$, log scale)",
@@ -272,7 +272,8 @@ lpoly %>%
   scale_colour_colorblind(name = NULL, guide = FALSE) +
   scale_fill_manual(values = c(alpha("#cccccc", 0.3), alpha("#009E73", 0.6)), labels = c("> 2.5 mio.","< 2.5 mio."),
                     name = "Population", guide = guide_legend(title.position = "top", override.aes = list(size = 3))) + 
-  scale_size(trans = "exp", name = "log(area[km^2])", range = c(2, 8), breaks = seq(4,16,2), guide = guide_legend(title.position = "top")) +
+  scale_size(trans = "exp", name = expression(paste("log(area[", km^{2}, "])")), 
+             range = c(2, 8), breaks = seq(4,16,2), guide = guide_legend(title.position = "top")) +
   facet_wrap(~period) +
   labs(x = "Initial GDP per capita (2005 PPP US$, log scale)",
        y = "Decadal emigration flow/initial population",
