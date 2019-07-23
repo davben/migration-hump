@@ -9,7 +9,7 @@ This repository contains data and code to reproduce the central migration hump d
 
 and includes a discussion of potential problems interpreting the hump as a country trajectory.
 
-![](./fig/plot1.png){width=500px}
+![](./fig/plot1.png | width=500)
 
 ## Data
 
