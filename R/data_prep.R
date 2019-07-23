@@ -23,17 +23,17 @@ saveRDS(population, "./data/un_population_country_year.rds")
 
 
 # Penn World data ---------------------------------------------------------
-## rgdpe: Expenditure-side real GDP at chained PPPs (in mil. 2011US$)
+## rgdpe: Expenditure-side real GDP at chained PPPs (in mil. 2005US$)
 ## pop:	Population (in millions)
-url1 <- "https://www.rug.nl/ggdc/docs/pwt91.xlsx"
+url1 <- "https://www.rug.nl/ggdc/docs/pwt80.xlsx"
 GET(url1, write_disk(tf <- tempfile(fileext = ".xlsx")))
 
-penn_gdp <- read_excel(tf, sheet = "Data") %>%
+penn_world <- read_excel(tf, sheet = "Data") %>%
   mutate(gdp_exp = rgdpe * 1e6,
          pop = pop * 1e6) %>%
   select(iso3 = countrycode, year, gdp_exp, pop)
 
-saveRDS(penn_gdp, "./data/penn_gdp.rds")
+saveRDS(penn_world, "./data/penn_world.rds")
 
 
 
