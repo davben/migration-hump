@@ -34,21 +34,3 @@ penn_world <- read_excel(tf, sheet = "Data") %>%
   select(iso3 = countrycode, year, gdp_exp, pop)
 
 saveRDS(penn_world, "./data/penn_world.rds")
-
-
-
-# UCDP armed conflict data ------------------------------------------------
-## Pettersson, Therese; Stina Högbladh & Magnus Öberg, 2019. Organized violence, 1989-2018 and peace agreements, Journal of Peace Research 56(4).
-## Gleditsch, Nils Petter, Peter Wallensteen, Mikael Eriksson, Margareta Sollenberg, and Håvard Strand (2002) Armed Conflict 1946-2001: A New Dataset. Journal of Peace Research 39(5). 
-
-acd <- read_csv("http://ucdp.uu.se/downloads/ucdpprio/ucdp-prio-acd-191.csv")
-acd <- acd %>%
-  filter(type_of_conflict %in% c("3", "4")) %>%
-  select(year, gwno_loc, intensity_level) %>%
-  mutate(iso3 = countrycode(gwno_loc, "cown", "iso3c", 
-                            custom_match = c(`678` = "YEM", `751` = "IND", `817` = "VNM", `345` = "SRB"))) %>%
-  group_by(iso3, year) %>%
-  summarise(conflict = max(intensity_level)) %>%
-  ungroup()
-
-saveRDS(acd, "./data/ucdp_acd.rds")
