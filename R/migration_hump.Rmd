@@ -1,30 +1,44 @@
 ---
 title: 'Migration Hump: Deconstructing the cross-section'
-author: "David Benček"
-date: "19 Juli 2019"
+author: "David Benček & Claas Schneiderheinze"
+date: "23 July 2019"
 output: 
  html_document:
    code_download: true
+bibliography: ../migration_hump_literature.bib
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
 library(tidyverse)
 library(ggrepel)
-library(plm)
+library(ggthemes)
 library(np)
-
+library(rnaturalearth)
+library(sf)
 theme_set(theme_light())
 ```
 
 ## Summary
 
-Migration hump as a well-known phenomenon among researchers, practitioners as well as politicians.
-Most prominently propagated by Clemens/Postel (2014, 2017)
+The migration hump is a well-known phenomenon among researchers, practitioners as well as politicians and most prominently propagated by @clemens_does_2014 and @clemens_deterring_2018.
+We demonstrate that the migration hump is based entirely on cross-sectional data.
+Causal interpretations of the relationship between income and emigration are thus dependent on very strong assumptions.
+We suggest that the cross-sectional hump may be due to other country-specific factors.
+In order to identify the impact of income on emigration, we argue that it is necessary to use time-series analyses of a subset of countries.
 
 
-## Reproduction of Clemens & Postel (2014)
+## Reproducing @clemens_does_2014
 
+First we reproduce the central plot in @clemens_does_2014 showing the inverted U-shaped relationship between per capita GDP and emigration rates.
+This is done using the same data sources: 
+
+  - decadal migration flows are derived from World Bank bilateral migration stocks, expanded by one decade;
+  - GDP and population numbers are taken from the Penn World Table (version 8).
+
+We follow the approach described by @clemens_does_2014, estimating nonparametric regressions for each decade and end up with virtually the same representation of the data (left: @clemens_does_2014; right: our estimation and visualization).
+The only difference is the estimated regression line for the decade 1970–1980 - perhaps there has been a revision of the World Bank data that reduced estimated migration stocks from high-income countries in 1980.
+The rest of the fitted lines correspond to the original and reproduce the visible increase of emigration rates up until per capita incomes of about PPP$5000.
 ```{r migration-flows, echo = FALSE}
 ## load World Bank migration stocks
 ## previously constructed from bilateral migration matrices
@@ -32,9 +46,9 @@ wb <- readRDS("../data/wb_bilateral_stocks.rds")
 
 
 ## calculate flows from stocks
-### option a) calculate total outward stock per country and year, 
-###           then calculate flow from differences between years,
-###           then delete negative flows
+### calculate total outward stock per country and year, 
+### then calculate flow from differences between years,
+### then delete negative flows
 emigration <- wb %>%
   rename(iso3 = origin_code) %>%
   filter(year <= 2010) %>%
@@ -44,58 +58,46 @@ emigration <- wb %>%
          decade = year - 10) %>%
   ungroup() %>%
   select(-year) %>%
-  filter(!is.na(emigration_flow),
-         emigration_flow > 0) %>%
+  filter(!is.na(emigration_flow)) %>%
   filter(!(iso3 %in% c("MAC", "BRN"))) # to replicate Clemens (2014)
 ```
 
-```{r population}
-## load UN population data by age and year (in thousands)
-##  United Nations, Department of Economic and Social Affairs, Population Division (2019). World Population Prospects 2019, Online Edition.
-## see 'data_prep.R'
-population <- readRDS("../data/un_population_country_year.rds")
-```
-
-
-```{r gdp}
-## load GDP data
+```{r gdp-population}
+## load GDP and population data
 ## Feenstra, Robert C., Robert Inklaar and Marcel P. Timmer (2015), "The Next Generation of the Penn World Table" American Economic Review, 105(10), 3150-3182, available for download at www.ggdc.net/pwt
 ## see 'data_prep.R'
 
-gdp_penn <- readRDS("../data/penn_gdp.rds")
+penn_world <- readRDS("../data/penn_world.rds")
 ```
 
-```{r armed-conflict}
-## load UCDP armed conflict data
-## Pettersson, Therese; Stina Högbladh & Magnus Öberg, 2019. Organized violence, 1989-2018 and peace agreements, Journal of Peace Research 56(4).
-## Gleditsch, Nils Petter, Peter Wallensteen, Mikael Eriksson, Margareta Sollenberg, and Håvard Strand (2002) Armed Conflict 1946-2001: A New Dataset. Journal of Peace Research 39(5). 
-acd <- readRDS("../data/ucdp_acd.rds") %>%
-  filter(!is.na(iso3)) %>%
-  mutate(decade = year %/% 10 * 10) %>% 
-  complete(iso3, decade) %>%
-  replace_na(list(conflict = 0)) %>%
-  group_by(iso3, decade) %>%
-  summarise(conflict = sum(conflict, na.rm = TRUE) > 0) %>%
-  ungroup()
+```{r country-area}
+## use a global shapefile to calculate the surface area of countries
+world <- ne_countries(returnclass = "sf", scale = "large") %>%
+  mutate(area = st_area(geometry),
+         area = units::set_units(area, km^2)) %>%
+  filter(!is.na(area)) %>%
+  mutate(normalized_area = units::drop_units((area - mean(area)) / sd(area)),
+         standardized_area = units::drop_units((area - - min(area)) / (max(area) - min(area))),
+         log_area = units::drop_units(log(area))) %>%
+  select(iso3 = iso_a3, normalized_area, standardized_area, log_area) %>%
+  st_drop_geometry()
 ```
+
 
 ```{r reproduction-data}
 clemens <- emigration %>%
-  left_join(population, c("iso3", "decade" = "year"))  %>%
-  left_join(gdp_penn, c("iso3", "decade" = "year")) %>%
-  left_join(acd, c("iso3", "decade")) %>%
-  replace_na(list(conflict = FALSE)) %>%
+  left_join(penn_world, c("iso3", "decade" = "year")) %>%
+  left_join(world, "iso3") %>%
   mutate(decadal_emigration_rate = emigration_flow/pop,
          gdp_pc_exp = gdp_exp / pop) %>%
   mutate(period = paste(decade, decade + 10, sep = "–")) %>%
-  select(iso3, decade, period, decadal_emigration_rate, gdp_pc_exp, pop, conflict) %>%
-  mutate(small = pop < 2500000,
-         small_or_conflict = small + conflict > 0) %>%
+  select(iso3, decade, period, decadal_emigration_rate, gdp_pc_exp, pop,  contains("area")) %>%
+  mutate(small = pop < 2500000) %>%
   filter(!is.na(gdp_pc_exp)) # there are no observations where one gdp variable is NA while the other is not.
 ```
 
-```{r}
-## Kernel smoother function
+```{r np-regression}
+## function for single nonparametric regression
 bw_lpoly <- function(bw, data) {
   #bw_opt <- npregbw(decadal_emigration_rate ~ log(gdp_pc), data = data, ckertype = "epanechnikov")
   
@@ -106,45 +108,216 @@ bw_lpoly <- function(bw, data) {
            smooth = model$mean)
 }
 
-## estimate kernel regression over range of bandwidths
+## function to run nonparametric regression over range of bandwidths
 estimate_local_poly <- function(df, bw = 0.5) {
   map_df(bw, bw_lpoly, data = df)
 }
 
 
-
+## estimate kernel regression
 lpoly <- clemens %>%
   group_by(period) %>%
-  mutate(label = ifelse(decadal_emigration_rate > quantile(decadal_emigration_rate, probs = 0.9),
-                        iso3, "")) %>%
   ungroup() %>%
+  #filter(gdp_pc_exp < 100000) %>%
   # filter(decadal_emigration_rate < quantile(decadal_emigration_rate, probs = 0.9) & 
   #          decadal_emigration_rate > quantile(decadal_emigration_rate, probs = 0.1)) %>%
   # filter(decadal_emigration_rate < 0.1) %>%
-  # filter(!small_or_conflict) %>%
   nest(-period) %>%
   mutate(smoother = data %>% map(estimate_local_poly, bw = seq(0.4, 0.6, 0.02))) %>%
-  unnest(smoother)
-  
-
-
-lpoly %>%
-  ggplot() +
-  geom_line(aes(gdp_pc_exp, smooth, group = bw), alpha = 0.1) +
-  geom_line(data = lpoly %>% group_by(period, gdp_pc_exp) %>% summarise(smooth = mean(smooth)),
-            aes(gdp_pc_exp, smooth), size = 1) +
-  # geom_point(data = lpoly %>% distinct(period, iso3, .keep_all = TRUE),
-  #            aes(x = gdp_pc_exp, y = decadal_emigration_rate, colour = small), alpha = 0.2) + #colour = "#009E73"
-  # geom_text_repel(data = lpoly %>% distinct(period, iso3, .keep_all = TRUE),
-  #                 aes(x = gdp_pc_exp, y = decadal_emigration_rate, label = label, colour = small)) +
-  scale_x_log10(breaks = c(500, 5000, 50000), limits = c(400, 100000)) +
-  scale_y_continuous(label = scales::percent_format(accuracy = 1)) + # limits = c(0, 0.6)
-  scale_colour_manual(values = c("#cccccc", "#E69F00"), name = "Population < 2.5 Mio.") +
-  facet_wrap(~period) +
-  labs(x = "Initial GDP per capita (log scale)",
-       y = "Decadal emigration flow/initial population")
-
+  unnest(smoother) %>%
+  mutate(label = ifelse(decadal_emigration_rate > quantile(decadal_emigration_rate, probs = 0.9),
+                        iso3, ""))
 ```
 
 
+```{r reproduce-plot, fig.width=4, fig.height=4}
 
+knitr::include_graphics("../fig/clemens_2014_hump.png", dpi = 200)
+
+annotations_df <- tribble(~x, ~y, ~period,
+                          2800, 0.007, "1960–1970",
+                          50000, 0.031, "1970–1980",
+                          15000, 0.054, "1980–1990",
+                          55000, 0.011, "1990–2000",
+                          50000, 0, "2000–2010")
+
+lpoly %>%
+  ggplot() +
+  geom_line(aes(gdp_pc_exp, smooth, group = interaction(bw, period), colour = period), alpha = 0.15) +
+  geom_line(data = lpoly %>% group_by(period, gdp_pc_exp) %>% summarise(smooth = mean(smooth)),
+            aes(gdp_pc_exp, smooth, colour = period), size = 1) +
+  geom_text(data = annotations_df, aes(x, y, label = period, colour = period)) +
+  scale_x_log10(breaks = c(500, 5000, 50000)) +
+  scale_y_continuous(label = scales::percent_format(accuracy = 1)) + 
+  scale_colour_colorblind(name = NULL, guide = FALSE) +
+   labs(x = "Initial GDP per capita (2005 PPP US$, log scale)",
+       y = "Decadal emigration flow/initial population",
+       title = "Emigrant flows by decade, World Bank",
+       subtitle = str_wrap("Nadaraya-Watson kernel-weighted local means, bandwidth range 0.4–0.6 natural log points, average in bold.", 50),
+       caption = str_wrap("Source: Own calculations and visualization, code at https://github.com/davben/migration-hump", 50))
+
+#ggsave("../fig/plot1.png", width = 15, height = 15, units = "cm", dpi = 300)
+```
+
+
+## What may drive this cross-sectional relationship?
+While @clemens_does_2014 makes sure to emphasize that the depicted relationship does not necessarily "demonstrate a transition path that any given country must take", his theoretical arguments about the mobility transition as well as his portrayal of the cross-sectional analysis as being methodologically superior to time-series approaches strongly imply an advocacy of a causal interpretation.
+This becomes even clearer in @clemens_deterring_2018.
+
+
+We argue that the cross-sectional migration hump may be misleading and be partly based on various country-specific attributes.
+To make things easier to follow, we can first view each decade separately.
+
+```{r with-facets}
+lpoly %>%
+  ggplot() +
+  geom_line(aes(gdp_pc_exp, smooth, group = interaction(bw, period), colour = period), alpha = 0.1) +
+  geom_line(data = lpoly %>% group_by(period, gdp_pc_exp) %>% summarise(smooth = mean(smooth)),
+            aes(gdp_pc_exp, smooth, colour = period), size = 1) +
+  scale_x_log10(breaks = c(500, 5000, 50000)) +
+  scale_y_continuous(label = scales::percent_format(accuracy = 1)) + 
+  scale_colour_colorblind(name = NULL, guide = FALSE) +
+  facet_wrap(~period) +
+  labs(x = "Initial GDP per capita (2005 PPP US$, log scale)",
+       y = "Decadal emigration flow/initial population",
+       title = "Emigrant flows by decade, World Bank",
+       subtitle = str_wrap("Nadaraya-Watson kernel-weighted local means, bandwidth range 0.4–0.6 natural log points, average in bold.", 80),
+       caption = "Source: Own calculations and visualization, code at https://github.com/davben/migration-hump")
+
+#ggsave("../fig/plot2.png", width = 23, height = 15, units = "cm", dpi = 300)
+```
+
+So far, we have only seen the fitted regression line to get an idea of the hump.
+When we add in the observed data points, the inverted U-shape actually becomes a lot less pronounced and we may start to suspect that it is possibly driven by those few observations with migration rates well above 5 percent.
+
+```{r with-data-points}
+lpoly %>%
+  ggplot() +
+  geom_point(data = lpoly %>% distinct(period, iso3, .keep_all = TRUE),
+             aes(x = gdp_pc_exp, y = decadal_emigration_rate), alpha = 0.2) + 
+  geom_line(aes(gdp_pc_exp, smooth, group = interaction(bw, period), colour = period), alpha = 0.1) +
+  geom_line(data = lpoly %>% group_by(period, gdp_pc_exp) %>% summarise(smooth = mean(smooth)),
+            aes(gdp_pc_exp, smooth, colour = period), size = 1) +
+  scale_x_log10(breaks = c(500, 5000, 50000)) +
+  scale_y_continuous(label = scales::percent_format(accuracy = 1)) + 
+  scale_colour_colorblind(name = NULL, guide = FALSE) +
+  facet_wrap(~period) +
+  labs(x = "Initial GDP per capita (2005 PPP US$, log scale)",
+       y = "Decadal emigration flow/initial population",
+       title = "Emigrant flows by decade, World Bank",
+       subtitle = str_wrap("Nadaraya-Watson kernel-weighted local means, bandwidth range 0.4–0.6 natural log points, average in bold.", 80),
+       caption = "Source: Own calculations and visualization, code at https://github.com/davben/migration-hump")
+
+#ggsave("../fig/plot3.png", width = 23, height = 15, units = "cm", dpi = 300)
+```
+
+What kind of countries have such high emigration rates in the duration of a single decade?
+The plot below depicts country size in two ways:
+
+  - physical size (measured as the surface area in log km^2), reflected in the area of the circles;
+  - population size (measured as a binary variable indicating a population below or above 2.5 million), reflected in the colour of the circles.
+  
+Among those countries that drive the inverted U-shape of the fitted line, the vast majority is small in both physical size and population.
+
+```{r show-country-size}
+lpoly %>%
+  ggplot() +
+  geom_point(data = lpoly %>% distinct(period, iso3, .keep_all = TRUE),
+             aes(x = gdp_pc_exp, y = decadal_emigration_rate, size = log_area, fill = small), 
+             shape = 21, stroke = 0, colour = alpha("black", 0.3)) + 
+  geom_line(aes(gdp_pc_exp, smooth, group = interaction(bw, period), colour = period), alpha = 0.1) +
+  geom_line(data = lpoly %>% group_by(period, gdp_pc_exp) %>% summarise(smooth = mean(smooth)),
+            aes(gdp_pc_exp, smooth, colour = period), size = 1) +
+  scale_x_log10(breaks = c(500, 5000, 50000)) +
+  scale_y_continuous(label = scales::percent_format(accuracy = 1)) +
+  scale_colour_colorblind(name = NULL, guide = FALSE) +
+  scale_fill_manual(values = c(alpha("#cccccc", 0.3), alpha("#009E73", 0.6)), labels = c("> 2.5 mio.","< 2.5 mio."),
+                    name = "Population", guide = guide_legend(title.position = "top", override.aes = list(size = 3))) + 
+  scale_size(trans = "exp", name = "log(area[km^2])", range = c(2, 8), breaks = seq(4,16,2), 
+             guide = guide_legend(title.position = "top", override.aes = list(colour = "black"))) +
+  facet_wrap(~period) +
+  labs(x = "Initial GDP per capita (2005 PPP US$, log scale)",
+       y = "Decadal emigration flow/initial population",
+       title = "Emigrant flows by decade, World Bank",
+        subtitle = str_wrap("circle size reflects country surface area, green circles represent countries with populations below 2.5 million.", 80),
+        caption = "Source: Own calculations and visualization, code at https://github.com/davben/migration-hump") +
+  theme(legend.position = c(0.68,0.45),
+        legend.justification = c(0,1),
+        legend.box = "vertical",
+        legend.direction = "horizontal")
+
+#ggsave("../fig/plot4.png", width = 23, height = 15, units = "cm", dpi = 300)
+```
+
+There are multiple reasons why small countries may exhibit higher emigration rates than large ones.
+For one, countries like St. Kitts & Nevis for example have such a low population that even emigration flows that are small in absolute terms represent a significant percentage of the entire population.
+Furthermore, it is much easier to leave a country the area of which is small as it is less costly or also physically demanding to reach the nearest border.
+Accordingly, the outliers in this analysis include countries such as Barbados, Cape Verde, Portugal, Albania, Eswatini and Luxembourg.
+
+```{r with-data-labels}
+
+lpoly %>%
+  ggplot() +
+  geom_point(data = lpoly %>% distinct(period, iso3, .keep_all = TRUE),
+             aes(x = gdp_pc_exp, y = decadal_emigration_rate, size = log_area, fill = small), 
+             shape = 21, stroke = 0, colour = alpha("black", 0.3)) + 
+  geom_text_repel(data = lpoly %>% distinct(period, iso3, .keep_all = TRUE),
+                  aes(x = gdp_pc_exp, y = decadal_emigration_rate, label = label),
+                  size = 2) +
+  geom_line(aes(gdp_pc_exp, smooth, group = interaction(bw, period), colour = period), alpha = 0.1) +
+  geom_line(data = lpoly %>% group_by(period, gdp_pc_exp) %>% summarise(smooth = mean(smooth)),
+            aes(gdp_pc_exp, smooth, colour = period), size = 1) +
+  scale_x_log10(breaks = c(500, 5000, 50000)) +
+  scale_y_continuous(label = scales::percent_format(accuracy = 1)) +
+  scale_colour_colorblind(name = NULL, guide = FALSE) +
+  scale_fill_manual(values = c(alpha("#cccccc", 0.3), alpha("#009E73", 0.6)), labels = c("> 2.5 mio.","< 2.5 mio."),
+                    name = "Population", guide = guide_legend(title.position = "top", override.aes = list(size = 3))) + 
+  scale_size(trans = "exp", name = "log(area[km^2])", range = c(2, 8), breaks = seq(4,16,2), guide = guide_legend(title.position = "top")) +
+  facet_wrap(~period) +
+  labs(x = "Initial GDP per capita (2005 PPP US$, log scale)",
+       y = "Decadal emigration flow/initial population",
+       title = "Emigrant flows by decade, World Bank",
+        subtitle = str_wrap("circle size reflects country surface area, green circles represent countries with populations below 2.5 million.", 80),
+        caption = "Source: Own calculations and visualization, code at https://github.com/davben/migration-hump") +
+  theme(legend.position = c(0.68,0.45),
+        legend.justification = c(0,1),
+        legend.box = "vertical",
+        legend.direction = "horizontal")
+
+#ggsave("../fig/plot5.png", width = 23, height = 15, units = "cm", dpi = 300)
+```
+
+## Our approach to identify the effect of income on emigration
+One of the arguments @clemens_does_2014 makes in favour of a cross-sectional instead of a panel analysis is that the latter would not be able to identify the inverted U-shape:
+Because time-series data for individual countries is mostly limited to 20 to 30 years of observations, panel studies can only analyze a slice of a potentially century-long development process along the estimated curve.
+
+To mitigate this problem, we split the hypothesized hump into two parts - one with an increasing and one with a decreasing slope.
+The following figure demonstrates this using a sample split at an income level of 7000 US$ per capita and two separate fitted OLS-regressions for each decade.
+
+```{r as-linear-model}
+lpoly %>%
+  mutate(income_group = gdp_pc_exp < 7000) %>%
+  ggplot() +
+  geom_smooth(aes(gdp_pc_exp, decadal_emigration_rate, group = income_group),
+              method = "lm") +
+  geom_point(data = lpoly %>% distinct(period, iso3, .keep_all = TRUE),
+             aes(x = gdp_pc_exp, y = decadal_emigration_rate), alpha = 0.2) +
+  scale_x_log10(breaks = c(500, 5000, 50000)) +
+  scale_y_continuous(label = scales::percent_format(accuracy = 1)) + 
+  scale_colour_colorblind(name = NULL, guide = FALSE) +
+  coord_cartesian(ylim = c(0, 0.06)) +
+  facet_wrap(~period) +
+  labs(x = "Initial GDP per capita (2005 PPP US$, log scale)",
+       y = "Decadal emigration flow/initial population",
+       title = "Emigrant flows by decade, World Bank",
+       subtitle = "sample split at PPP$7000, fitted OLS-estimates",
+       caption = "Source: Own calculations and visualization, code at https://github.com/davben/migration-hump")
+
+#ggsave("../fig/plot6.png", width = 23, height = 15, units = "cm", dpi = 300)
+```
+
+While the right side of the hump is all over the place using a linear model, the left side, i.e. the sample of low-income countries, exhibits a robust positive slope across the decades.
+In our empirical analysis we therefore focus on a set of countries that has remained on the left-hand side of the supposed peak of the migration hump throughout the observation period.
+Using panel regressions on this reduced sample we would have to find a robust positive effect of income on emigration rates.
+
+## References
